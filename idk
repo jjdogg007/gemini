@@ -1,0 +1,708 @@
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+// Firebase imports
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, onSnapshot, doc, getDocs, writeBatch, addDoc, updateDoc, deleteDoc, query, where, Timestamp } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+// Date management library
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, isEqual, isToday, parseISO, areIntervalsOverlapping } from 'date-fns';
+import ReactDOM from 'react-dom/client';
+
+
+// --- Firebase Configuration ---
+const firebaseConfig = {
+  apiKey: "AIzaSyCvvmjbVDSTdiHsvEV27JlBK1x1iFeO91k",
+  authDomain: "myscheduler-825e0.firebaseapp.com",
+  projectId: "myscheduler-825e0",
+  storageBucket: "myscheduler-825e0.appspot.com",
+  messagingSenderId: "1001851059822",
+  appId: "1:1001851059822:web:1631000721aa8e6c02f07f"
+};
+
+// Initialize Firebase and services
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+// --- Initial Data & Constants ---
+const initialEmployees = [
+    { name: 'Scales, Jack', type: 'PT', shifts: '7a-7p', availability: 'Sat,Sun', max_days: 5, target_hours: 96, email: '', hire_date: '2023-12-01' },
+    { name: 'Heberer, Jacob', type: 'FT', shifts: '10a-6:30p', availability: 'Mon,Tue,Wed,Thu,Fri', max_days: 5, target_hours: 160, email: '', hire_date: '2023-08-05' },
+    { name: 'Garcia, Mosserat', type: 'PT', shifts: '2p-10:30p', availability: 'Sat,Sun', max_days: 2, target_hours: 64, email: '', hire_date: '2024-02-20' },
+    { name: 'OPEN SHIFTS (Extra)', type: 'Bank', shifts: '', availability: 'Mon,Tue,Wed,Thu,Fri,Sat,Sun', max_days: null, target_hours: null, email: '', hire_date: '' },
+    { name: 'OPEN POSITION', type: 'FT', shifts: '1p-9:30p', availability: 'Mon,Tue,Wed,Thu,Fri', max_days: 5, target_hours: 160, email: '', hire_date: '' },
+    { name: 'OPEN SHIFTS (Coverage)', type: 'Bank', shifts: '', availability: 'Mon,Tue,Wed,Thu,Fri,Sat,Sun', max_days: null, target_hours: null, email: '', hire_date: '' },
+    { name: 'Sifuentes, Stephany', type: 'FT', shifts: '6:30p-3a', availability: 'Mon,Tue,Wed,Thu,Fri', max_days: 5, target_hours: 160, email: '', hire_date: '2023-09-01' },
+    { name: 'Harvey-Edwin, Jean', type: 'PT', shifts: 'Varies', availability: 'Varies', max_days: 3, target_hours: 96, email: '', hire_date: '2023-11-10' },
+    { name: 'Thaxton, Tequita', type: 'PT', shifts: '9:30p-6a', availability: 'Mon,Tue,Wed,Thu,Fri', max_days: 5, target_hours: 96, email: '', hire_date: '2024-06-10' },
+    { name: 'Hosey, Dianna', type: 'PT', shifts: 'Varies', availability: 'Varies', max_days: 3, target_hours: 96, email: '', hire_date: '2024-03-12' },
+    { name: 'Thompson, Quientia', type: 'PT', shifts: 'Varies', availability: 'Varies', max_days: 3, target_hours: 96, email: '', hire_date: '2024-07-01' },
+    { name: 'OPEN POSITION', type: 'PT', shifts: '6:30p-3a', availability: 'Sat,Sun', max_days: 2, target_hours: 64, email: '', hire_date: '' },
+    { name: 'Dowling, Tina', type: 'PT', shifts: '10p-6a', availability: 'Fri,Sat', max_days: 2, target_hours: 64, email: '', hire_date: '2024-01-15' },
+    { name: 'Keene, Shanetra', type: 'FT', shifts: '2p-10:30p', availability: 'Mon,Tue,Wed,Thu,Fri', max_days: 5, target_hours: 160, email: '', hire_date: '2023-07-18' },
+    { name: 'OPEN SHIFTS (Misc)', type: 'Bank', shifts: '', availability: 'Mon,Tue,Wed,Thu,Fri,Sat,Sun', max_days: null, target_hours: null, email: '', hire_date: '' },
+    { name: 'Merrick, Tanya', type: 'PT', shifts: '6a-2:30p', availability: 'Sat,Sun', max_days: 2, target_hours: 64, email: '', hire_date: '2024-04-22' },
+    { name: 'Puebla, Alisia', type: 'PT', shifts: '10a-6:30p', availability: 'Sat,Sun', max_days: 2, target_hours: 64, email: '', hire_date: '2024-05-15' },
+    { name: 'Melgar, Lisa', type: 'PT', shifts: '5:30a-2p', availability: 'Mon,Tue,Wed,Thu,Fri', max_days: 5, target_hours: 120, email: '', hire_date: '2024-01-08' },
+];
+
+const SHIFT_TEMPLATES = ["7a-3p", "3p-11p", "11p-7a", "7a-7p", "7p-7a", "10a-6:30p", "1p-9:30p", "6a-2:30p", "2p-10:30p", "5:30a-2p", "6:30p-3a", "9:30p-6a", "10p-6a"];
+
+// --- Helper Functions ---
+const calculateShiftDuration = (shiftTime) => {
+    if (!shiftTime || typeof shiftTime !== 'string' || !shiftTime.includes('-')) return 0;
+    try {
+        const [startStr, endStr] = shiftTime.split('-');
+        const parseTime = (timeStr) => {
+            const isPM = timeStr.includes('p');
+            const [hourStr, minStr] = timeStr.replace(/[ap]/, '').split(':');
+            let hours = parseInt(hourStr, 10);
+            const minutes = minStr ? parseInt(minStr, 10) / 60 : 0;
+            if (isPM && hours !== 12) hours += 12;
+            if (!isPM && hours === 12) hours = 0;
+            return hours + minutes;
+        };
+        let startTime = parseTime(startStr);
+        let endTime = parseTime(endStr);
+        if (endTime <= startTime) endTime += 24;
+        return endTime - startTime;
+    } catch (e) {
+        console.error("Could not parse shift time:", shiftTime);
+        return 0;
+    }
+};
+
+const isEmployeeAvailable = (employee, day) => {
+    if (!employee || !employee.availability || employee.availability === 'Varies' || employee.type === 'Bank') {
+        return true;
+    }
+    const dayOfWeek = format(day, 'EEE');
+    return employee.availability.includes(dayOfWeek);
+};
+
+// --- UI Components ---
+const CalendarIcon = () => <svg className="w-5 h-5 mr-3 text-gray-400 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>;
+const UsersIcon = () => <svg className="w-5 h-5 mr-3 text-gray-400 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M15 21a6 6 0 00-9-5.197m0 0A5.995 5.995 0 003 21v-1a6 6 0 0112 0v1z"></path></svg>;
+const ClockIcon = () => <svg className="w-5 h-5 mr-3 text-gray-400 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>;
+
+const NavLink = ({ icon, children, isActive, onClick }) => (
+  <button onClick={onClick} className={`group flex items-center w-full px-4 py-2 mt-2 text-sm font-medium rounded-md text-left ${isActive ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'}`}>
+    {icon}
+    {children}
+  </button>
+);
+
+const MetricCard = ({ title, value, change, isLoading }) => (
+  <div className="bg-gray-800 p-5 rounded-lg shadow-md">
+    <h3 className="text-sm font-medium text-gray-400 truncate">{title}</h3>
+    {isLoading ? <div className="mt-1 text-3xl font-semibold text-gray-500 animate-pulse">...</div> : <p className="mt-1 text-3xl font-semibold text-white">{value}</p>}
+    {change && !isLoading && <p className="mt-1 text-sm text-green-400">{change}</p>}
+  </div>
+);
+
+const ContextMenu = ({ x, y, options, onClose }) => {
+    useEffect(() => {
+        const handleClickOutside = () => onClose();
+        document.addEventListener('click', handleClickOutside);
+        return () => document.removeEventListener('click', handleClickOutside);
+    }, [onClose]);
+
+    return (
+        <div style={{ top: y, left: x }} className="absolute z-50 bg-gray-700 border border-gray-600 rounded-md shadow-lg py-1">
+            {options.map((option, index) => (
+                <button key={index} onClick={option.onClick} disabled={option.disabled} className="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-indigo-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed">
+                    {option.label}
+                </button>
+            ))}
+        </div>
+    );
+};
+
+const ShiftModal = ({ isOpen, onClose, data, onSave, onDelete }) => {
+    const [shiftTime, setShiftTime] = useState('');
+    const [customShiftTime, setCustomShiftTime] = useState('');
+    const [note, setNote] = useState('');
+    const [ptoReason, setPtoReason] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        const initialShift = data?.shift?.shiftTime || '';
+        if (SHIFT_TEMPLATES.includes(initialShift)) {
+            setShiftTime(initialShift);
+            setCustomShiftTime('');
+        } else {
+            setShiftTime('custom');
+            setCustomShiftTime(initialShift);
+        }
+        setNote(data?.shift?.note || '');
+        setPtoReason(data?.shift?.ptoReason || '');
+    }, [data]);
+
+    if (!isOpen) return null;
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        try {
+            const finalShiftTime = shiftTime === 'custom' ? customShiftTime : shiftTime;
+            await onSave({ mode: data.mode, shiftTime: finalShiftTime, ptoReason, note });
+        } finally {
+            setIsSaving(false);
+            onClose();
+        }
+    };
+    
+    const handleDelete = async () => {
+        setIsSaving(true);
+        try {
+            await onDelete();
+        } finally {
+            setIsSaving(false);
+            onClose();
+        }
+    };
+
+    const renderForm = () => {
+        switch (data.mode) {
+            case 'ADD_PTO':
+                return (
+                    <div>
+                        <label htmlFor="pto" className="block text-sm font-medium text-gray-300">PTO Reason</label>
+                        <input type="text" id="pto" value={ptoReason} onChange={(e) => setPtoReason(e.target.value)} className="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="e.g., Sick, Vacation" />
+                    </div>
+                );
+            case 'ADD_NOTE':
+                return (
+                    <div>
+                        <label htmlFor="note" className="block text-sm font-medium text-gray-300">Note</label>
+                        <textarea id="note" value={note} onChange={(e) => setNote(e.target.value)} rows="3" className="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="Add a note for this day..."></textarea>
+                    </div>
+                );
+            default:
+                return (
+                    <>
+                        <div>
+                            <label htmlFor="shift-template" className="block text-sm font-medium text-gray-300">Shift Template</label>
+                            <select id="shift-template" value={shiftTime} onChange={(e) => setShiftTime(e.target.value)} className="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                                <option value="">Select a shift...</option>
+                                {SHIFT_TEMPLATES.map(template => <option key={template} value={template}>{template}</option>)}
+                                <option value="custom">Custom...</option>
+                            </select>
+                        </div>
+                        {shiftTime === 'custom' && (
+                            <div>
+                                <label htmlFor="shift-custom" className="block text-sm font-medium text-gray-300">Custom Shift Time</label>
+                                <input type="text" id="shift-custom" value={customShiftTime} onChange={(e) => setCustomShiftTime(e.target.value)} className="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="e.g., 8:30a-4p" />
+                            </div>
+                        )}
+                    </>
+                );
+        }
+    };
+
+    const getTitle = () => {
+        switch (data.mode) {
+            case 'ADD_PTO': return 'Add PTO';
+            case 'ADD_NOTE': return 'Add Note';
+            case 'EDIT_SHIFT': return 'Edit Shift';
+            default: return 'Add Shift';
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-8 w-full max-w-md">
+                <h3 className="text-2xl font-bold text-white mb-2">{getTitle()}</h3>
+                <p className="text-sm text-gray-400 mb-6">{data.employee.name} on {format(data.day, 'EEE, MMM d')}</p>
+                <div className="space-y-4">{renderForm()}</div>
+                <div className="mt-8 flex justify-between">
+                    <div>{data.shift && (<button type="button" onClick={handleDelete} disabled={isSaving} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50">Delete</button>)}</div>
+                    <div className="flex space-x-4">
+                        <button type="button" onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">Cancel</button>
+                        <button type="button" onClick={handleSave} disabled={isSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50">{isSaving ? 'Saving...' : 'Save'}</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const ConfirmModal = ({ isOpen, onCancel, onConfirm, title, children }) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-8 w-full max-w-md">
+                <h3 className="text-2xl font-bold text-white mb-4">{title}</h3>
+                <div className="text-gray-300 mb-6">{children}</div>
+                <div className="flex justify-end space-x-4">
+                    <button onClick={onCancel} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">Cancel</button>
+                    <button onClick={onConfirm} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">Confirm</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const InfoModal = ({ isOpen, onClose, title, children }) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-8 w-full max-w-md">
+                <h3 className="text-2xl font-bold text-white mb-4">{title}</h3>
+                <div className="text-gray-300 mb-6">{children}</div>
+                <div className="flex justify-end">
+                    <button onClick={onClose} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">OK</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
+const ScheduleGrid = ({ employees, schedule, setMonth, currentMonth, onCellClick, onCellContextMenu }) => {
+    const days = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) });
+    
+    const getShiftForEmployeeAndDay = (employeeId, day) => schedule.find(s => s.employeeId === employeeId && s.date?.seconds && isEqual(new Date(s.date.seconds * 1000), day));
+
+    const getCellContent = (shift) => {
+        if (!shift) return '';
+        if (shift.ptoReason) return <span className="font-bold text-yellow-400 bg-yellow-900/50 px-2 py-1 rounded">{shift.ptoReason}</span>;
+        if (shift.note) return <span className="italic text-gray-400">{shift.note}</span>;
+        return shift.shiftTime;
+    };
+
+    const monthlyHours = useMemo(() => {
+        const hoursMap = {};
+        employees.forEach(emp => {
+            const empShifts = schedule.filter(s => s.employeeId === emp.id && s.date?.seconds && startOfMonth(new Date(s.date.seconds * 1000)).getTime() === startOfMonth(currentMonth).getTime());
+            const total = empShifts.reduce((acc, curr) => acc + calculateShiftDuration(curr.shiftTime), 0);
+            hoursMap[emp.id] = total;
+        });
+        return hoursMap;
+    }, [employees, schedule, currentMonth]);
+
+    const getCellClassName = (employee, day, shift) => {
+        let classes = "px-4 py-4 whitespace-nowrap text-center text-sm text-gray-300 border-l border-gray-700 hover:bg-gray-700 cursor-pointer";
+        const available = isEmployeeAvailable(employee, day);
+        
+        if (isToday(day)) classes += ' bg-indigo-900/50';
+        if (!available && !shift) classes += ' bg-red-900/20';
+        if (shift && shift.shiftTime && !available) classes += ' bg-red-800/60 font-bold text-white';
+        return classes;
+    };
+
+    const getTotalHoursClassName = (employee, totalHours) => {
+        let classes = "px-4 py-4 text-center text-sm font-semibold text-white";
+        if (employee.target_hours && totalHours > employee.target_hours) {
+            classes += ' bg-yellow-900/50 text-yellow-300';
+        }
+        return classes;
+    };
+
+    return (
+        <div className="bg-gray-800 p-6 rounded-lg shadow-inner">
+            <div className="flex justify-between items-center mb-4">
+                <button onClick={() => setMonth(subMonths(currentMonth, 1))} className="p-2 rounded-md hover:bg-gray-700"><svg className="w-6 h-6 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg></button>
+                <h3 className="text-lg font-semibold text-white">{format(currentMonth, 'MMMM yyyy')}</h3>
+                <button onClick={() => setMonth(addMonths(currentMonth, 1))} className="p-2 rounded-md hover:bg-gray-700"><svg className="w-6 h-6 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg></button>
+            </div>
+            <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-700">
+                    <thead className="bg-gray-800">
+                        <tr>
+                            <th className="sticky left-0 bg-gray-800 px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider w-48 z-10">Employee</th>
+                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider w-24">Target</th>
+                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider w-24">Total</th>
+                            {days.map(day => (
+                                <th key={day.toString()} className={`px-4 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider w-24 ${isToday(day) ? 'bg-indigo-900' : ''}`}>
+                                    <div>{format(day, 'EEE')}</div>
+                                    <div className="font-normal text-gray-400">{format(day, 'd')}</div>
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody className="bg-gray-800 divide-y divide-gray-700">
+                        {employees.map(employee => (
+                            <tr key={employee.id}>
+                                <td className="sticky left-0 bg-gray-800 px-6 py-4 whitespace-nowrap text-sm font-medium text-white z-10">{employee.name}</td>
+                                <td className="px-4 py-4 text-center text-sm text-gray-400">{employee.target_hours || 'N/A'}</td>
+                                <td className={getTotalHoursClassName(employee, monthlyHours[employee.id] || 0)}>{monthlyHours[employee.id] || 0}</td>
+                                {days.map(day => {
+                                    const shift = getShiftForEmployeeAndDay(employee.id, day);
+                                    return (
+                                        <td key={day.toString()} onClick={() => onCellClick(employee, day, shift)} onContextMenu={(e) => onCellContextMenu(e, employee, day, shift)} className={getCellClassName(employee, day, shift)}>
+                                            {getCellContent(shift)}
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+
+// --- Page Components ---
+const DashboardPage = (props) => {
+    const [isGenerating, setIsGenerating] = useState(false);
+
+    const doGenerateSchedule = async () => {
+        setIsGenerating(true);
+        const { employees, schedule, currentMonth, setInfoModal } = props;
+        const daysInMonth = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) });
+        const scheduleCollectionRef = collection(db, "schedules");
+        const batch = writeBatch(db);
+
+        for (const emp of employees) {
+            if (emp.type === 'Bank' || emp.name.includes('OPEN')) continue;
+
+            for (const day of daysInMonth) {
+                const isAvailable = isEmployeeAvailable(emp, day);
+                const existingShift = schedule.find(s => s.employeeId === emp.id && s.date?.seconds && isEqual(new Date(s.date.seconds * 1000), day));
+
+                if (isAvailable && !existingShift && emp.shifts) {
+                    const newShiftRef = doc(scheduleCollectionRef);
+                    batch.set(newShiftRef, { employeeId: emp.id, date: day, shiftTime: emp.shifts, note: '', ptoReason: '' });
+                }
+            }
+        }
+        try {
+            await batch.commit();
+            setInfoModal({ title: "Success", message: "Schedule generated successfully!" });
+        } catch (e) {
+            console.error("Error generating schedule:", e);
+            setInfoModal({ title: "Error", message: "Failed to generate schedule." });
+        }
+        setIsGenerating(false);
+    };
+
+    const handleGenerateClick = () => {
+        props.setConfirmModal({
+            title: "Generate Schedule?",
+            message: "This will fill empty slots for the month based on employee defaults. Existing shifts will not be overwritten. Continue?",
+            onConfirm: doGenerateSchedule
+        });
+    };
+    
+    const handleClearClick = () => {
+        props.setConfirmModal({
+            title: "Clear Schedule?",
+            message: `This will permanently delete all shifts for ${format(props.currentMonth, 'MMMM yyyy')}. Are you sure?`,
+            onConfirm: doClearSchedule
+        });
+    };
+
+    const doClearSchedule = async () => {
+        const { schedule, currentMonth, setInfoModal } = props;
+        const batch = writeBatch(db);
+        const shiftsInMonth = schedule.filter(s => s.date?.seconds && startOfMonth(new Date(s.date.seconds * 1000)).getTime() === startOfMonth(currentMonth).getTime());
+        
+        shiftsInMonth.forEach(shift => {
+            batch.delete(doc(db, "schedules", shift.id));
+        });
+
+        try {
+            await batch.commit();
+            setInfoModal({ title: "Success", message: "Schedule for the month has been cleared." });
+        } catch (e) {
+            console.error("Error clearing schedule:", e);
+            setInfoModal({ title: "Error", message: "Failed to clear schedule." });
+        }
+    };
+
+    const sortedEmployees = [...props.employees].sort((a, b) => {
+        const aIsOpen = a.name.includes('OPEN SHIFTS');
+        const bIsOpen = b.name.includes('OPEN SHIFTS');
+        if (aIsOpen && !bIsOpen) return -1;
+        if (!aIsOpen && bIsOpen) return 1;
+        return a.name.localeCompare(b.name);
+    });
+    return (
+      <>
+        <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8">
+          <div><h2 className="text-3xl font-bold text-white">Manager Dashboard</h2><p className="text-gray-400 mt-1">Welcome back, let's get your team scheduled.</p></div>
+          <div className="flex space-x-2 mt-4 sm:mt-0">
+            <button onClick={handleClearClick} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">Clear Schedule</button>
+            <button onClick={handleGenerateClick} disabled={isGenerating} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                {isGenerating ? 'Generating...' : 'Generate Schedule'}
+            </button>
+          </div>
+        </header>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <MetricCard title="Total Employees" value={props.employees.filter(e => !e.name.includes('OPEN')).length} isLoading={props.isLoading} />
+          <MetricCard title="Schedule Coverage" value="92%" />
+          <MetricCard title="Pending PTO" value={props.ptoRequests.filter(r => r.status === 'pending').length} isLoading={props.isLoading} />
+          <MetricCard title="Schedule Conflicts" value="0" />
+        </div>
+        <ScheduleGrid {...props} employees={sortedEmployees} />
+      </>
+    );
+}
+
+const TeamManagementPage = ({ employees, isLoading }) => {
+     const sortedEmployees = [...employees].sort((a, b) => a.name.localeCompare(b.name));
+    return (
+    <>
+        <header className="flex justify-between items-center mb-8">
+            <div><h2 className="text-3xl font-bold text-white">Team Management</h2><p className="text-gray-400 mt-1">View and manage your employee roster.</p></div>
+        </header>
+        <div className="bg-gray-800 rounded-lg shadow-inner"><div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-700"><thead className="bg-gray-800"><tr><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Name</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Type</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Shifts</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Availability</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Hire Date</th></tr></thead><tbody className="bg-gray-800 divide-y divide-gray-700">{isLoading ? (<tr><td colSpan="5" className="text-center py-10 text-gray-500">Authenticating & Loading...</td></tr>) : employees.length === 0 ? (<tr><td colSpan="5" className="text-center py-10 text-gray-500">Roster is empty.</td></tr>) : (sortedEmployees.map(employee => (<tr key={employee.id}><td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{employee.name}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{employee.type}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{employee.shifts}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{employee.availability}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{employee.hire_date}</td></tr>)))}</tbody></table></div></div>
+    </>
+    );
+};
+
+const TimeOffCenterPage = ({ ptoRequests, employees, setInfoModal, schedule }) => {
+    const getEmployeeName = (employeeId) => {
+        const employee = employees.find(e => e.id === employeeId);
+        return employee ? employee.name : 'Unknown';
+    };
+
+    const handleApprove = async (request) => {
+        const requestRef = doc(db, "pto_requests", request.id);
+        await updateDoc(requestRef, { status: "approved" });
+        setInfoModal({ title: "Success", message: "PTO request approved." });
+    };
+
+    const handleDeny = async (request) => {
+        const requestRef = doc(db, "pto_requests", request.id);
+        await updateDoc(requestRef, { status: "denied" });
+        setInfoModal({ title: "Success", message: "PTO request denied." });
+    };
+
+    const approvedDates = useMemo(() => {
+        const dates = new Set();
+        ptoRequests.forEach(r => {
+            if (r.status === 'approved' && r.startDate?.seconds) {
+                const range = eachDayOfInterval({
+                    start: new Date(r.startDate.seconds * 1000),
+                    end: new Date(r.endDate.seconds * 1000)
+                });
+                range.forEach(day => dates.add(format(day, 'yyyy-MM-dd')));
+            }
+        });
+        return dates;
+    }, [ptoRequests]);
+
+    const hasConflict = (request) => {
+        if (!request.startDate?.seconds) return false;
+        const requestRange = eachDayOfInterval({
+            start: new Date(request.startDate.seconds * 1000),
+            end: new Date(request.endDate.seconds * 1000)
+        });
+        for (const day of requestRange) {
+            if (approvedDates.has(format(day, 'yyyy-MM-dd'))) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const sortedRequests = [...ptoRequests].sort((a, b) => {
+        if (a.status !== b.status) {
+            return a.status === "pending" ? -1 : 1;
+        }
+        return (a.submittedAt?.seconds || 0) - (b.submittedAt?.seconds || 0);
+    });
+
+    return (
+        <>
+            <header className="flex justify-between items-center mb-8">
+                <div>
+                    <h2 className="text-3xl font-bold text-white">Time Off Center</h2>
+                    <p className="text-gray-400 mt-1">Review and manage employee PTO requests.</p>
+                </div>
+            </header>
+            <div className="bg-gray-800 rounded-lg shadow-inner">
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-700">
+                        <thead className="bg-gray-800">
+                            <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Employee</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Dates Requested</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Reason</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-gray-800 divide-y divide-gray-700">
+                            {sortedRequests.map(req => {
+                                const conflict = req.status === 'pending' && hasConflict(req);
+                                return (
+                                    <tr key={req.id}>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{getEmployeeName(req.employeeId)}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                                            {req.startDate?.seconds ? format(new Date(req.startDate.seconds * 1000), 'MMM d, yyyy') : ''} - {req.endDate?.seconds ? format(new Date(req.endDate.seconds * 1000), 'MMM d, yyyy') : ''}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{req.reason}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                                req.status === 'approved' ? 'bg-green-900 text-green-300' :
+                                                req.status === 'denied' ? 'bg-red-900 text-red-300' :
+                                                'bg-yellow-900 text-yellow-300'
+                                            }`}>
+                                                {req.status}
+                                            </span>
+                                            {conflict && <span className="ml-2 text-yellow-400 font-bold">⚠️ CONFLICT</span>}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                            {req.status === 'pending' && (
+                                                <div className="flex space-x-2">
+                                                    <button onClick={() => handleApprove(req)} disabled={conflict} className="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded disabled:opacity-50 disabled:cursor-not-allowed">Approve</button>
+                                                    <button onClick={() => handleDeny(req)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded">Deny</button>
+                                                </div>
+                                            )}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </>
+    );
+};
+
+const AuthConfigurationError = () => (
+  <div className="bg-gray-900 text-gray-100 min-h-screen flex items-center justify-center p-4 font-sans"><div className="bg-red-900 border border-red-700 rounded-lg p-8 max-w-2xl w-full text-center shadow-2xl"><h2 className="text-3xl font-bold text-white mb-4">Action Required: Enable Anonymous Sign-In</h2><p className="text-lg text-red-200 mb-6">The app failed to connect because <strong className="font-bold">Anonymous Authentication</strong> is not enabled in your Firebase project. This is a required one-time setup step.</p><div className="text-left bg-gray-800 p-6 rounded-lg"><h3 className="text-xl font-bold text-white mb-4">How to Fix in 60 Seconds:</h3><ol className="list-decimal list-inside space-y-3 text-red-100"><li>Go to the <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" className="text-indigo-300 hover:underline font-semibold">Firebase Console</a> and select your project (`myscheduler-825e0`).</li><li>In the left menu, click <strong className="font-semibold">Build &gt; Authentication</strong>.</li><li>Click the <strong className="font-semibold">"Get started"</strong> button.</li><li>From the list of sign-in providers, select <strong className="font-semibold">"Anonymous"</strong>.</li><li><strong className="font-semibold">Enable</strong> the toggle switch and click <strong className="font-semibold">Save</strong>.</li></ol></div><p className="mt-6 text-red-200">After enabling it, please re-run the code. The app will then load correctly.</p></div></div>
+);
+
+// --- Main App Component ---
+export default function App() {
+  const [activePage, setActivePage] = useState('Dashboard');
+  const [employees, setEmployees] = useState([]);
+  const [schedule, setSchedule] = useState([]);
+  const [ptoRequests, setPtoRequests] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [authError, setAuthError] = useState(false);
+  const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
+  const [contextMenu, setContextMenu] = useState(null);
+  const [modalData, setModalData] = useState(null);
+  const [confirmModal, setConfirmModal] = useState(null);
+  const [infoModal, setInfoModal] = useState(null);
+
+  const handleCellClick = useCallback((employee, day, shift) => {
+    setContextMenu(null);
+    if (!isEmployeeAvailable(employee, day) && !shift) return;
+    setModalData({ mode: shift ? 'EDIT_SHIFT' : 'ADD_SHIFT', employee, day, shift });
+  }, []);
+
+  const handleCellContextMenu = useCallback((event, employee, day, shift) => {
+      event.preventDefault();
+      const available = isEmployeeAvailable(employee, day);
+      setContextMenu({
+          x: event.pageX, y: event.pageY,
+          options: [
+              { label: shift ? 'Edit/View Details' : 'Add Shift', onClick: () => handleCellClick(employee, day, shift), disabled: !available && !shift },
+              { label: 'Add PTO', onClick: () => setModalData({ mode: 'ADD_PTO', employee, day, shift }), disabled: employee.name.includes('OPEN') },
+              { label: 'Add Note', onClick: () => setModalData({ mode: 'ADD_NOTE', employee, day, shift }) },
+          ]
+      });
+  }, [handleCellClick]);
+
+  const handleSaveModal = async (data) => {
+    const { mode, shiftTime, ptoReason, note } = data;
+    const { employee, day, shift } = modalData;
+    const scheduleCollectionRef = collection(db, "schedules");
+
+    try {
+        if (mode === 'ADD_PTO') {
+            if (!shift || !shift.shiftTime) {
+                setInfoModal({title: "Error", message: "Cannot add PTO for a day the employee is not scheduled."});
+                return;
+            }
+            const openShiftsEmployees = employees.filter(e => e.name.includes('OPEN SHIFTS'));
+            const busyOpenShifts = schedule.filter(s => s.date && isEqual(new Date(s.date.seconds * 1000), day)).map(s => s.employeeId);
+            const availableOpenShift = openShiftsEmployees.find(e => !busyOpenShifts.includes(e.id));
+
+            if (!availableOpenShift) {
+                setInfoModal({title: "Error", message: "All 'OPEN SHIFTS' slots are already filled for this day. Cannot move the shift."});
+                return;
+            }
+            
+            await updateDoc(doc(db, 'schedules', shift.id), { shiftTime: '', ptoReason: ptoReason || 'PTO', note: '' });
+            await addDoc(scheduleCollectionRef, { employeeId: availableOpenShift.id, date: day, shiftTime: shift.shiftTime });
+
+        } else {
+            const payload = { employeeId: employee.id, date: day, shiftTime: mode === 'ADD_SHIFT' || mode === 'EDIT_SHIFT' ? shiftTime : '', note: mode === 'ADD_NOTE' ? note : '', ptoReason: '' };
+            if (shift) {
+                await updateDoc(doc(db, 'schedules', shift.id), payload);
+            } else {
+                await addDoc(scheduleCollectionRef, payload);
+            }
+        }
+    } catch (e) { console.error("Error saving to database: ", e); setInfoModal({title: "Error", message: "There was an error saving the data."}); }
+  };
+
+  const handleDeleteModal = async () => {
+      if (modalData?.shift?.id) {
+          try {
+              await deleteDoc(doc(db, 'schedules', modalData.shift.id));
+          } catch(e) { console.error("Error deleting document: ", e); setInfoModal({title: "Error", message: "Failed to delete entry."}); }
+      }
+  };
+
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, user => {
+      if (user) {
+        const employeesCollectionRef = collection(db, "employees");
+        const scheduleCollectionRef = collection(db, "schedules");
+        const ptoRequestsCollectionRef = collection(db, "pto_requests");
+
+        const importInitialData = async () => {
+            const empSnapshot = await getDocs(employeesCollectionRef);
+            if (empSnapshot.empty) {
+                const batch = writeBatch(db);
+                initialEmployees.forEach(employee => {
+                    const newDocRef = doc(employeesCollectionRef);
+                    batch.set(newDocRef, employee);
+                });
+                await batch.commit();
+            }
+        };
+        const unsubEmployees = onSnapshot(employeesCollectionRef, (snapshot) => {
+            setEmployees(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            setIsLoading(false);
+        });
+        const unsubSchedule = onSnapshot(scheduleCollectionRef, (snapshot) => {
+            setSchedule(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+        const unsubPtoRequests = onSnapshot(ptoRequestsCollectionRef, (snapshot) => {
+            setPtoRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+
+        importInitialData();
+        return () => { unsubEmployees(); unsubSchedule(); unsubPtoRequests(); };
+      } else {
+        signInAnonymously(auth).catch(error => { if (error.code === 'auth/configuration-not-found') setAuthError(true); });
+      }
+    });
+    return () => unsubscribeAuth();
+  }, []);
+
+  if (authError) return <AuthConfigurationError />;
+
+  return (
+    <div className="bg-gray-900 text-gray-100 min-h-screen flex font-sans antialiased" onClick={() => setContextMenu(null)}>
+      <aside className="w-64 bg-gray-800 border-r border-gray-700 p-4 flex-shrink-0 flex flex-col">
+        <div className="flex items-center mb-8 px-2"><div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center font-bold text-xl">S</div><h1 className="ml-3 text-xl font-bold">Scheduler</h1></div>
+        <nav className="flex-grow">
+          <NavLink icon={<CalendarIcon />} isActive={activePage === 'Dashboard'} onClick={() => setActivePage('Dashboard')}>Dashboard</NavLink>
+          <NavLink icon={<UsersIcon />} isActive={activePage === 'Team Management'} onClick={() => setActivePage('Team Management')}>Team Management</NavLink>
+          <NavLink icon={<ClockIcon />} isActive={activePage === 'Time Off Center'} onClick={() => setActivePage('Time Off Center')}>Time Off Center</NavLink>
+        </nav>
+        <div className="mt-auto pt-4 border-t border-gray-700"><p className="px-4 text-xs text-gray-500">Version 1.6.0 (Time Off Center)</p></div>
+      </aside>
+      <main className="flex-1 p-6 lg:p-8 overflow-y-auto">
+        {activePage === 'Dashboard' && <DashboardPage employees={employees} schedule={schedule} ptoRequests={ptoRequests} isLoading={isLoading} setMonth={setCurrentMonth} currentMonth={currentMonth} onCellClick={handleCellClick} onCellContextMenu={handleCellContextMenu} setConfirmModal={setConfirmModal} setInfoModal={setInfoModal} />}
+        {activePage === 'Team Management' && <TeamManagementPage employees={employees} isLoading={isLoading} />}
+        {activePage === 'Time Off Center' && <TimeOffCenterPage ptoRequests={ptoRequests} employees={employees} setInfoModal={setInfoModal} schedule={schedule} />}
+      </main>
+      {contextMenu && <ContextMenu {...contextMenu} onClose={() => setContextMenu(null)} />}
+      {modalData && <ShiftModal isOpen={!!modalData} onClose={() => setModalData(null)} data={modalData} onSave={handleSaveModal} onDelete={handleDeleteModal} />}
+      {confirmModal && <ConfirmModal isOpen={!!confirmModal} onCancel={() => setConfirmModal(null)} onConfirm={() => { confirmModal.onConfirm(); setConfirmModal(null); }} title={confirmModal.title}>{confirmModal.message}</ConfirmModal>}
+      {infoModal && <InfoModal isOpen={!!infoModal} onClose={() => setInfoModal(null)} title={infoModal.title}>{infoModal.message}</InfoModal>}
+    </div>
+  );
+}
