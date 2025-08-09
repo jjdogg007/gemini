@@ -6,12 +6,12 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMont
 
 // Firebase Configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyCvvmjbVDSTdiHsvEV27JlBK1x1iFeO91k",
-  authDomain: "myscheduler-825e0.firebaseapp.com",
-  projectId: "myscheduler-825e0",
-  storageBucket: "myscheduler-825e0.appspot.com",
-  messagingSenderId: "1001851059822",
-  appId: "1:1001851059822:web:1631000721aa8e6c02f07f"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 const app = initializeApp(firebaseConfig);
