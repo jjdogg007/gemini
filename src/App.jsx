@@ -74,14 +74,20 @@ const isEmployeeAvailable = (employee, day) => {
     return employee.availability.includes(dayOfWeek);
 };
 
-// UI Icons
+  // Icons
 const CalendarIcon = () => <svg className="w-5 h-5 mr-3 text-gray-400 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>;
 const UsersIcon = () => <svg className="w-5 h-5 mr-3 text-gray-400 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M15 21a6 6 0 00-9-5.197m0 0A5.995 5.995 0 003 21v-1a6 6 0 0112 0v1z"></path></svg>;
 const ClockIcon = () => <svg className="w-5 h-5 mr-3 text-gray-400 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>;
 const DocumentIcon = () => <svg className="w-5 h-5 mr-3 text-gray-400 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>;
+const ChartIcon = () => <svg className="w-5 h-5 mr-3 text-gray-400 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>;
+const MenuIcon = () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>;
+const XIcon = () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>;
 
 // Main App Component
 import EmployeePTORequestForm from './components/EmployeePTORequestForm';
+import EmployeePTOHistoryPage from './components/EmployeePTOHistoryPage';
+import PTOCalendarPage from './components/PTOCalendarPage';
+import AdminReportingPage from './components/AdminReportingPage';
 import PrintablePTOForm from './components/PrintablePTOForm';
 
 export default function App() {
@@ -96,12 +102,22 @@ export default function App() {
   const [modalData, setModalData] = useState(null);
   const [confirmModal, setConfirmModal] = useState(null);
   const [infoModal, setInfoModal] = useState(null);
+  const [currentEmployeeId, setCurrentEmployeeId] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Rest of the component logic will go here...
   const NavLink = ({ icon, children, isActive, onClick }) => (
-    <button onClick={onClick} className={`group flex items-center w-full px-4 py-2 mt-2 text-sm font-medium rounded-md text-left ${isActive ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'}`}>
+    <button 
+      onClick={() => {
+        onClick();
+        setSidebarOpen(false); // Close sidebar on mobile after clicking
+      }} 
+      className={`group flex items-center w-full px-4 py-2 mt-2 text-sm font-medium rounded-md text-left transition-colors duration-200 ${
+        isActive ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+      }`}
+    >
       {icon}
-      {children}
+      <span className="truncate">{children}</span>
     </button>
   );
 
@@ -401,31 +417,136 @@ export default function App() {
 
   return (
     <div className="bg-gray-900 text-gray-100 min-h-screen flex font-sans antialiased">
-      <aside className="w-64 bg-gray-800 border-r border-gray-700 p-4 flex-shrink-0 flex flex-col">
-        <div className="flex items-center mb-8 px-2">
-          <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center font-bold text-xl">S</div>
-          <h1 className="ml-3 text-xl font-bold">Scheduler</h1>
+      {/* Sidebar */}
+      <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:static inset-y-0 left-0 z-50 w-64 bg-gray-800 border-r border-gray-700 p-4 flex-shrink-0 flex flex-col transition-transform duration-300 ease-in-out`}>
+        <div className="flex items-center justify-between mb-8 px-2">
+          <div className="flex items-center">
+            <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center font-bold text-xl">S</div>
+            <h1 className="ml-3 text-xl font-bold">Scheduler</h1>
+          </div>
+          <button 
+            onClick={() => setSidebarOpen(false)}
+            className="lg:hidden text-gray-400 hover:text-white"
+          >
+            <XIcon />
+          </button>
         </div>
         <nav className="flex-grow">
           <NavLink icon={<CalendarIcon />} isActive={activePage === 'Dashboard'} onClick={() => setActivePage('Dashboard')}>Dashboard</NavLink>
           <NavLink icon={<UsersIcon />} isActive={activePage === 'Team Management'} onClick={() => setActivePage('Team Management')}>Team Management</NavLink>
           <NavLink icon={<DocumentIcon />} isActive={activePage === 'Submit PTO Request'} onClick={() => setActivePage('Submit PTO Request')}>Submit PTO Request</NavLink>
+          <NavLink icon={<ClockIcon />} isActive={activePage === 'PTO History'} onClick={() => setActivePage('PTO History')}>PTO History</NavLink>
+          <NavLink icon={<CalendarIcon />} isActive={activePage === 'PTO Calendar'} onClick={() => setActivePage('PTO Calendar')}>PTO Calendar</NavLink>
+          <NavLink icon={<ChartIcon />} isActive={activePage === 'Admin Reports'} onClick={() => setActivePage('Admin Reports')}>Admin Reports</NavLink>
           <NavLink icon={<ClockIcon />} isActive={activePage === 'Time Off Center'} onClick={() => setActivePage('Time Off Center')}>Time Off Center</NavLink>
         </nav>
         <div className="mt-auto pt-4 border-t border-gray-700">
-          <p className="px-4 text-xs text-gray-500">Version 1.6.0 (Time Off Center)</p>
+          <p className="px-4 text-xs text-gray-500">Version 2.0.0 (Enhanced PTO System)</p>
         </div>
       </aside>
-      <main className="flex-1 p-6 lg:p-8 overflow-y-auto">
-        {activePage === 'Submit PTO Request' && <EmployeePTORequestForm employees={employees} setInfoModal={setInfoModal} />}
-        {activePage === 'Time Off Center' && <TimeOffCenterPage ptoRequests={ptoRequests} employees={employees} setInfoModal={setInfoModal} />}
-        {(activePage === 'Dashboard' || activePage === 'Team Management') && (
-          <div className="text-center py-20">
-            <h2 className="text-2xl font-bold text-white mb-4">Feature Coming Soon</h2>
-            <p className="text-gray-400">This feature is currently being developed.</p>
-          </div>
-        )}
-      </main>
+
+      {/* Sidebar Overlay */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        ></div>
+      )}
+
+      {/* Main Content */}
+      <div className="flex-1 lg:ml-0">
+        {/* Mobile Header */}
+        <div className="lg:hidden bg-gray-800 border-b border-gray-700 p-4 flex items-center justify-between">
+          <button 
+            onClick={() => setSidebarOpen(true)}
+            className="text-gray-400 hover:text-white"
+          >
+            <MenuIcon />
+          </button>
+          <h2 className="text-lg font-semibold text-white">{activePage}</h2>
+          <div className="w-6"></div> {/* Spacer for centering */}
+        </div>
+
+        <main className="p-4 lg:p-6 xl:p-8 overflow-y-auto min-h-screen">
+          {activePage === 'Submit PTO Request' && (
+            <div>
+              {/* Employee Selection for PTO Request */}
+              <div className="mb-6">
+                <label htmlFor="currentEmployee" className="block text-sm font-medium text-gray-300 mb-2">
+                  Select Employee for PTO Request
+                </label>
+                <select
+                  id="currentEmployee"
+                  value={currentEmployeeId}
+                  onChange={(e) => setCurrentEmployeeId(e.target.value)}
+                  className="w-full max-w-xs bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="">Select an employee...</option>
+                  {employees.filter(emp => !emp.name.includes('OPEN') && emp.type !== 'Bank').map(emp => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <EmployeePTORequestForm 
+                employees={employees} 
+                ptoRequests={ptoRequests}
+                setInfoModal={setInfoModal} 
+              />
+            </div>
+          )}
+          {activePage === 'PTO History' && (
+            <div>
+              {/* Employee Selection for PTO History */}
+              <div className="mb-6">
+                <label htmlFor="historyEmployee" className="block text-sm font-medium text-gray-300 mb-2">
+                  Select Employee to View History
+                </label>
+                <select
+                  id="historyEmployee"
+                  value={currentEmployeeId}
+                  onChange={(e) => setCurrentEmployeeId(e.target.value)}
+                  className="w-full max-w-xs bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="">Select an employee...</option>
+                  {employees.filter(emp => !emp.name.includes('OPEN') && emp.type !== 'Bank').map(emp => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <EmployeePTOHistoryPage 
+                employees={employees} 
+                ptoRequests={ptoRequests}
+                currentEmployeeId={currentEmployeeId}
+                setInfoModal={setInfoModal} 
+              />
+            </div>
+          )}
+          {activePage === 'PTO Calendar' && (
+            <PTOCalendarPage 
+              employees={employees} 
+              ptoRequests={ptoRequests}
+            />
+          )}
+          {activePage === 'Admin Reports' && (
+            <AdminReportingPage 
+              employees={employees} 
+              ptoRequests={ptoRequests}
+              setInfoModal={setInfoModal} 
+            />
+          )}
+          {activePage === 'Time Off Center' && <TimeOffCenterPage ptoRequests={ptoRequests} employees={employees} setInfoModal={setInfoModal} />}
+          {(activePage === 'Dashboard' || activePage === 'Team Management') && (
+            <div className="text-center py-20">
+              <h2 className="text-2xl font-bold text-white mb-4">Feature Coming Soon</h2>
+              <p className="text-gray-400">This feature is currently being developed.</p>
+            </div>
+          )}
+        </main>
+      </div>
       {infoModal && <InfoModal isOpen={!!infoModal} onClose={() => setInfoModal(null)} title={infoModal.title}>{infoModal.message}</InfoModal>}
     </div>
   );
