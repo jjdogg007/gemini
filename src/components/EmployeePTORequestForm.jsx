@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { addDoc, collection, Timestamp } from 'firebase/firestore';
-import { getFirestore } from 'firebase/firestore';
 import { differenceInDays } from 'date-fns';
-
-const db = getFirestore();
+import { db } from '../firebase.js';
 
 export default function EmployeePTORequestForm({ employees, ptoRequests = [], setInfoModal }) {
     const [selectedEmployee, setSelectedEmployee] = useState('');
