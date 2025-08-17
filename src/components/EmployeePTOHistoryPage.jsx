@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { format, differenceInDays } from 'date-fns';
 import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { getFirestore } from 'firebase/firestore';
-
-const db = getFirestore();
+import { db } from '../firebase.js';
 
 export default function EmployeePTOHistoryPage({ employees, ptoRequests, currentEmployeeId, setInfoModal }) {
     const [employee, setEmployee] = useState(null);
